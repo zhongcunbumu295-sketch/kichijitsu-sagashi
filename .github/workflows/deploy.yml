@@ -1,0 +1,56 @@
+name: サイトを公開
+
+on:
+  push:
+    branches: [main]
+  schedule:
+    # 毎月1日 9:15（日本時間）に作り直す。年が変わると新しい年のページが自動で増える
+    - cron: "15 0 1 * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - name: 暦計算のテスト（国立天文台のデータと照合）
+        run: python -m unittest discover -s tests
+      - id: pages
+        uses: actions/configure-pages@v5
+      - name: サイトを生成
+        run: python build.py --base-url "${{ steps.pages.outputs.base_url }}"
+      - uses: actions/upload-pages-artifact@v4
+        with:
+          path: dist
+      # 公開リポジトリは60日間動きがないと定期実行が止まるため、定期実行のたびに記録を残す
+      - name: 定期実行の記録
+        if: github.event_name == 'schedule'
+        run: |
+          date -u +"%Y-%m-%dT%H:%M:%SZ" > .github/last-build.txt
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add .github/last-build.txt
+          git commit -m "定期ビルドの記録" || true
+          git push || true
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
